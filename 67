@@ -1,0 +1,207 @@
+-- Services
+local Players = game:GetService("Players")
+local UserInputService = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local LocalPlayer = Players.LocalPlayer
+local Camera = workspace.CurrentCamera
+
+-- Variables
+local flying = false
+local flySpeed = 50
+local bodyVelocity = nil
+local bodyGyro = nil
+
+-- Fire your custom Event once on execute
+task.spawn(function()
+    pcall(function()
+        local Event = ReplicatedStorage:WaitForChild("SpawnGalaxy Block", 5)
+        if Event and Event:IsA("RemoteEvent") then
+            Event:FireServer()
+        end
+    end)
+end)
+
+-- Flight Control Logic
+local moveKeys = {
+    W = false, A = false, S = false, D = false,
+    Space = false, LeftShift = false
+}
+
+local function startFlying()
+    local character = LocalPlayer.Character
+    if not character then return end
+    local rootPart = character:FindFirstChild("HumanoidRootPart")
+    local humanoid = character:FindFirstChildOfClass("Humanoid")
+    if not rootPart or not humanoid then return end
+
+    flying = true
+    humanoid.PlatformStand = true
+
+    -- Velocity & Gyro
+    bodyVelocity = Instance.new("BodyVelocity")
+    bodyVelocity.Velocity = Vector3.new(0, 0, 0)
+    bodyVelocity.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
+    bodyVelocity.Parent = rootPart
+
+    bodyGyro = Instance.new("BodyGyro")
+    bodyGyro.MaxTorque = Vector3.new(math.huge, math.huge, math.huge)
+    bodyGyro.CFrame = rootPart.CFrame
+    bodyGyro.Parent = rootPart
+
+    -- Movement Loop
+    RunService:BindToRenderStep("FlyMovement", Enum.RenderPriority.Character.Value, function()
+        if not flying or not rootPart then return end
+
+        local cameraCFrame = Camera.CFrame
+        local moveDirection = Vector3.new(0, 0, 0)
+
+        if moveKeys.W then moveDirection = moveDirection + cameraCFrame.LookVector end
+        if moveKeys.S then moveDirection = moveDirection - cameraCFrame.LookVector end
+        if moveKeys.D then moveDirection = moveDirection + cameraCFrame.RightVector end
+        if moveKeys.A then moveDirection = moveDirection - cameraCFrame.RightVector end
+        if moveKeys.Space then moveDirection = moveDirection + Vector3.new(0, 1, 0) end
+        if moveKeys.LeftShift then moveDirection = moveDirection - Vector3.new(0, 1, 0) end
+
+        if moveDirection.Magnitude > 0 then
+            moveDirection = moveDirection.Unit
+        end
+
+        bodyVelocity.Velocity = moveDirection * flySpeed
+        bodyGyro.CFrame = cameraCFrame
+    end)
+end
+
+local function stopFlying()
+    flying = false
+    RunService:UnbindFromRenderStep("FlyMovement")
+
+    local character = LocalPlayer.Character
+    if character then
+        local humanoid = character:FindFirstChildOfClass("Humanoid")
+        if humanoid then humanoid.PlatformStand = false end
+    end
+
+    if bodyVelocity then bodyVelocity:Destroy() end
+    if bodyGyro then bodyGyro:Destroy() end
+end
+
+-- Key Input Tracking
+UserInputService.InputBegan:Connect(function(input, gpe)
+    if gpe then return end
+    if input.KeyCode == Enum.KeyCode.W then moveKeys.W = true end
+    if input.KeyCode == Enum.KeyCode.S then moveKeys.S = true end
+    if input.KeyCode == Enum.KeyCode.A then moveKeys.A = true end
+    if input.KeyCode == Enum.KeyCode.D then moveKeys.D = true end
+    if input.KeyCode == Enum.KeyCode.Space then moveKeys.Space = true end
+    if input.KeyCode == Enum.KeyCode.LeftShift then moveKeys.LeftShift = true end
+end)
+
+UserInputService.InputEnded:Connect(function(input, gpe)
+    if input.KeyCode == Enum.KeyCode.W then moveKeys.W = false end
+    if input.KeyCode == Enum.KeyCode.S then moveKeys.S = false end
+    if input.KeyCode == Enum.KeyCode.A then moveKeys.A = false end
+    if input.KeyCode == Enum.KeyCode.D then moveKeys.D = false end
+    if input.KeyCode == Enum.KeyCode.Space then moveKeys.Space = false end
+    if input.KeyCode == Enum.KeyCode.LeftShift then moveKeys.LeftShift = false end
+end)
+
+-- UI Setup (Floating Draggable Window)
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "FlySystemUI"
+screenGui.ResetOnSpawn = false
+screenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
+
+local mainFrame = Instance.new("Frame")
+mainFrame.Name = "MainFrame"
+mainFrame.Size = UDim2.new(0, 180, 0, 90)
+mainFrame.Position = UDim2.new(0.05, 0, 0.4, 0)
+mainFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 35)
+mainFrame.BorderSizePixel = 0
+mainFrame.Active = true
+mainFrame.Parent = screenGui
+
+local uiCorner = Instance.new("UICorner")
+uiCorner.CornerRadius = UDim.new(0, 10)
+uiCorner.Parent = mainFrame
+
+local titleLabel = Instance.new("TextLabel")
+titleLabel.Size = UDim2.new(1, 0, 0, 30)
+titleLabel.BackgroundTransparency = 1
+titleLabel.Text = "FLIGHT SYSTEM"
+titleLabel.TextColor3 = Color3.fromRGB(200, 200, 255)
+titleLabel.TextSize = 13
+titleLabel.Font = Enum.Font.GothamBold
+titleLabel.Parent = mainFrame
+
+local toggleBtn = Instance.new("TextButton")
+toggleBtn.Name = "ToggleFly"
+toggleBtn.Size = UDim2.new(0.85, 0, 0, 40)
+toggleBtn.Position = UDim2.new(0.075, 0, 0.42, 0)
+toggleBtn.BackgroundColor3 = Color3.fromRGB(180, 40, 40)
+toggleBtn.Text = "FLY: OFF"
+toggleBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+toggleBtn.TextSize = 14
+toggleBtn.Font = Enum.Font.GothamBold
+toggleBtn.Parent = mainFrame
+
+local btnCorner = Instance.new("UICorner")
+btnCorner.CornerRadius = UDim.new(0, 8)
+btnCorner.Parent = toggleBtn
+
+-- Make UI Draggable
+local dragging, dragInput, dragStart, startPos
+
+local function updateInput(input)
+    local delta = input.Position - dragStart
+    mainFrame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+end
+
+mainFrame.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        dragging = true
+        dragStart = input.Position
+        startPos = mainFrame.Position
+
+        input.Changed:Connect(function()
+            if input.UserInputState == Enum.UserInputState.End then
+                dragging = false
+            end
+        end)
+    end
+end)
+
+mainFrame.InputChanged:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
+        dragInput = input
+    end
+end)
+
+UserInputService.InputChanged:Connect(function(input)
+    if input == dragInput and dragging then
+        updateInput(input)
+    end
+end)
+
+-- Button Click Action
+toggleBtn.MouseButton1Click:Connect(function()
+    if flying then
+        stopFlying()
+        toggleBtn.Text = "FLY: OFF"
+        toggleBtn.BackgroundColor3 = Color3.fromRGB(180, 40, 40)
+    else
+        startFlying()
+        toggleBtn.Text = "FLY: ON"
+        toggleBtn.BackgroundColor3 = Color3.fromRGB(40, 180, 80)
+    end
+end)
+
+-- Character Reset Handler
+LocalPlayer.CharacterAdded:Connect(function()
+    if flying then
+        stopFlying()
+        toggleBtn.Text = "FLY: OFF"
+        toggleBtn.BackgroundColor3 = Color3.fromRGB(180, 40, 40)
+    end
+end)
